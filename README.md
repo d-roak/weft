@@ -47,31 +47,49 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 
-```bash
-# Terminal A — run a node and announce a service
-cargo run -- up --announce echo:demo
-#   weft node up
-#     id: 86a931be48cc4b2b…      ← copy this
+weft runs as a **background daemon**; the CLI talks to it over a local socket.
 
-# Terminal B — message that node by its id
-cargo run -- send 86a931be48cc4b2b… "hello"
-#   ← reply: ack "received"
+```bash
+cargo build --release && alias weft=./target/release/weft   # or `cargo run -- …`
+
+# Node A — start the daemon and announce a service
+weft --key a.json start --announce echo:demo
+#   weft daemon started
+#     id:  86a931be48cc4b2b…       ← copy this
+
+# Node B — start its daemon, then message A by id
+weft --key b.json start
+weft --key b.json send 86a931be48cc4b2b… "hello"
+#   ← ack "received"
+
+# A reads what arrived, then shuts down
+weft --key a.json inbox            #   ← message from …: "hello"
+weft --key a.json stop
 ```
 
-No relay setup, no port forwarding — the two nodes find each other through
-iroh's default discovery and connect directly or via a relay as needed.
+No relay setup, no port forwarding — nodes find each other through iroh's
+discovery (or mDNS on a LAN) and connect directly or via a relay as needed.
 
 ## CLI
 
+The daemon holds the live node; every other command is a thin client to it.
+
 | Command | What it does |
 |---|---|
-| `weft id` | Print this node's `EndpointId` (its shareable address). |
-| `weft up [--announce name:kind]… [--bootstrap <id>]…` | Run the node: connectivity + discovery + agent inbox. |
-| `weft send <to> <text>` | Send a message to a peer and print the reply. |
-| `weft services [--bootstrap <id>]` | Join the fabric and list discovered services. |
+| `weft id` | Print this node's `EndpointId` (no daemon needed). |
+| `weft start [--announce name:kind]… [--bootstrap <id>]…` | Start the node as a background daemon. |
+| `weft stop` | Stop the running daemon. |
+| `weft status` | Show whether the daemon is running, its id, and counters. |
+| `weft send <to> <text>` | Send a message to a peer; print the reply. |
+| `weft announce <name:kind>` | Announce a service on the fabric. |
+| `weft services` | List services the daemon has discovered. |
+| `weft inbox` | Print and clear messages the daemon has received. |
+| `weft daemon` | Run the node in the foreground (what `start` launches). |
 
-Identity is stored at `~/.weft/key.json` (override with `--key`). Keep it to
-keep your `EndpointId` stable across restarts.
+Identity is stored at `~/.weft/key.json` (override with `--key`, which also
+selects *which* daemon the CLI talks to). Keep the key to keep your
+`EndpointId` stable across restarts. The control socket lives at
+`/tmp/weft-<hash>.sock`; the pid and log sit next to the key file.
 
 > **Bootstrapping note:** gossip discovery needs at least one peer to join
 > through. The first node stands alone; later nodes pass `--bootstrap <id>` of a
@@ -122,7 +140,8 @@ src/
   agent.rs       agent messaging protocol (ALPN weft/agent/0)
   discovery.rs   gossip service registry + bootstrapping
   x402.rs        payment handshake types + verify seam
-  main.rs        the `weft` CLI
+  main.rs        the `weft` CLI (daemon + client commands)
+  control.rs     daemon control protocol over a Unix socket
 examples/
   agent_chat.rs  two agents talking (localhost/LAN), persistent identity
   iot_sensor.rs  IoT device on the fabric

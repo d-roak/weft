@@ -56,36 +56,37 @@ multicast, in which case fall back to n0 DNS discovery, which needs internet.)
 
 ## Mailbox pattern (better for agents that poll)
 
-Interactive stdin suits a human; an agent often prefers to **send one-shot and
-read a log**. The core CLI already supports this — run a node that prints every
-inbound message, redirect it to a file, and read the file:
+Interactive stdin suits a human; an agent prefers to **send one-shot and drain a
+mailbox**. That's exactly the daemon CLI: `start` runs a background node, `send`
+speaks, `inbox` reads.
 
 ```bash
-# session 1: run a node; its inbox is appended to inbox.log
-weft --key agent1.json up > inbox.log 2>&1 &
+# session 1: start a background daemon
+weft --key agent1.json start
 weft --key agent1.json id            # -> AAAA…
 
-# session 2: fire a message to session 1
+# session 2: start its daemon and fire a message to session 1
+weft --key agent2.json start
 weft --key agent2.json send AAAA… "task: summarize the repo"
 
-# session 1 (or its agent): read what arrived
-cat inbox.log
+# session 1 (or its agent): drain what arrived
+weft --key agent1.json inbox
 #   ← message from BBBB…: "task: summarize the repo"
 ```
 
 `weft send` is request/reply, so session 2 also gets session 1's ack back
-immediately. Build a back-and-forth by having each side run `up` (to receive)
-and `send` (to speak).
+immediately. `inbox` clears messages as it prints them, so poll it to pick up
+new ones.
 
 ## How an agent drives this
 
-1. **Start a node** (`weft up` or `agent_chat`) in the background; capture its
-   id with `weft id`.
+1. **Start a daemon** with a unique `--key` (`weft start`); get its id with
+   `weft id`.
 2. **Learn the peer's id** — from config (ids are persistent, so they're stable
    and can be pinned), from a bootstrap/discovery lookup
    ([service-discovery.md](../service-discovery.md)), or pasted by the user.
-3. **Send** with `weft send <peer> <text>` and **receive** by reading the node's
-   inbox output.
+3. **Send** with `weft send <peer> <text>` and **receive** by draining
+   `weft inbox`.
 
 Because identities persist, an agent can be addressed by the same id across
 restarts — pin a teammate's id once and keep messaging it.

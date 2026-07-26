@@ -63,6 +63,16 @@ Not a separate transport — a convention *on top of* agent messages. An unpaid
 the caller retries with a `payment` in the body. See
 [use-cases/x402.md](use-cases/x402.md).
 
+## Process model
+
+The `weft` binary runs as a **background daemon** that owns the live node; CLI
+commands are thin clients. `weft start` spawns the daemon in its own process
+group (survives terminal close), and `send`/`services`/`inbox`/… connect to it
+over a Unix socket at `/tmp/weft-<hash>.sock` (keyed by the identity file, so one
+`--key` = one daemon). The protocol is one newline-delimited JSON request/
+response per connection — see [`src/control.rs`](../src/control.rs). Inbound agent
+messages are buffered in the daemon and drained by `weft inbox`.
+
 ## Design choices
 
 - **iroh does connectivity; weft does not.** No custom NAT logic, no relay code.
