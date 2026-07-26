@@ -7,7 +7,8 @@
 set -eu
 
 REPO="d-roak/weft"
-BIN="weft"
+# The tarball ships the node CLI and the self-hosted relay server.
+BINS="weft weft-relay"
 INSTALL_DIR="${WEFT_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Map uname -> release target triple.
@@ -49,8 +50,13 @@ fi
 tar -xzf "$tmp/weft.tar.gz" -C "$tmp"
 
 mkdir -p "$INSTALL_DIR"
-install -m 0755 "$tmp/${BIN}" "$INSTALL_DIR/${BIN}"
-echo "weft: installed to ${INSTALL_DIR}/${BIN}"
+for bin in $BINS; do
+  # Older releases shipped only `weft`; skip anything not in the tarball.
+  if [ -f "$tmp/$bin" ]; then
+    install -m 0755 "$tmp/$bin" "$INSTALL_DIR/$bin"
+    echo "weft: installed to ${INSTALL_DIR}/${bin}"
+  fi
+done
 
 # PATH hint if needed.
 case ":$PATH:" in
@@ -58,4 +64,4 @@ case ":$PATH:" in
   *) echo "weft: add to your shell profile: export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
 
-"$INSTALL_DIR/${BIN}" --version 2>/dev/null || true
+"$INSTALL_DIR/weft" --version 2>/dev/null || true
