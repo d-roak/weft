@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Result, bail};
 use iroh::EndpointId;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use weft::{AgentMessage, Weft, load_or_create_secret_key};
+use weft::{AgentMessage, Config, Weft, load_or_create_secret_key};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
 
     // Persistent identity — stable EndpointId across restarts.
     let secret = load_or_create_secret_key(&key_path)?;
-    let (weft, mut inbox) = Weft::spawn(secret, vec![]).await?;
+    let (weft, mut inbox) = Weft::spawn(secret, Config::default()).await?;
     let me = weft.id();
     println!("you are  {me}");
     match &peer {

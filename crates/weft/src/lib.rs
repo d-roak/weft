@@ -4,8 +4,9 @@
 //! identity, NAT traversal (direct hole-punching with relay fallback), and
 //! discovery. weft is the thin layer on top that agents actually talk to:
 //!
-//! - **Base connectivity** — [`Weft::spawn`] binds an iroh endpoint with the
-//!   n0 preset (relay + DNS/pkarr discovery). See [`agent`] for messaging.
+//! - **Base connectivity** — [`Weft::spawn`] binds an iroh endpoint using the
+//!   relays and discovery named in [`Config`] (n0's public infrastructure by
+//!   default, your own if configured). See [`agent`] for messaging.
 //! - **Node bootstrapping & service discovery** — a shared gossip topic where
 //!   nodes announce the services they offer. See [`discovery`].
 //! - **Direct or relayed** — handled entirely by iroh. A connection starts
@@ -19,10 +20,12 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use iroh::{Endpoint, EndpointId, SecretKey, endpoint::presets};
+use iroh::address_lookup::{PkarrPublisher, PkarrResolver};
 use iroh::protocol::Router;
+use iroh::{Endpoint, EndpointId, RelayMode, RelayUrl, SecretKey, endpoint::presets};
 use iroh_gossip::net::Gossip;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
+use url::Url;
 
 pub mod agent;
 pub mod discovery;
@@ -30,6 +33,41 @@ pub mod x402;
 
 pub use agent::{AgentMessage, Inbox};
 pub use discovery::{ServiceAnnouncement, ServiceRegistry};
+
+/// How a node reaches the network: which relays to use, which discovery
+/// service to publish to, and who to bootstrap gossip through.
+///
+/// [`Config::default`] uses n0's public infrastructure. Set [`Config::relays`]
+/// and/or [`Config::pkarr_relay`] to run entirely on your own — see
+/// `docs/self-hosting.md`.
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    /// Peers to join the gossip swarm through. Empty = first node / rely on
+    /// mDNS on the LAN.
+    pub bootstrap: Vec<EndpointId>,
+    /// Relay servers to use. Empty = n0's public relays.
+    ///
+    /// Run your own with the `weft-relay` binary.
+    pub relays: Vec<RelayUrl>,
+    /// pkarr relay used to publish and resolve endpoint addresses.
+    /// `None` = n0's public DNS/pkarr discovery.
+    ///
+    /// Setting this *replaces* n0 discovery, so a self-hosted deployment does
+    /// not depend on n0 infrastructure at all.
+    pub pkarr_relay: Option<Url>,
+}
+
+impl Config {
+    /// Bootstrap through the given peers, keeping default (n0) infrastructure.
+    pub fn with_bootstrap(bootstrap: Vec<EndpointId>) -> Self {
+        Self { bootstrap, ..Default::default() }
+    }
+
+    /// True when this config points at self-hosted infrastructure.
+    pub fn is_self_hosted(&self) -> bool {
+        !self.relays.is_empty() || self.pkarr_relay.is_some()
+    }
+}
 
 /// A running weft node: an iroh endpoint wired up with gossip-based service
 /// discovery and the agent messaging protocol.
@@ -42,18 +80,36 @@ pub struct Weft {
 }
 
 impl Weft {
-    /// Spawn a node with the given identity, joining the gossip swarm through
-    /// `bootstrap` peers (empty = you are the first node / rely on discovery).
+    /// Spawn a node with the given identity and [`Config`].
     ///
     /// Returns the node and an [`Inbox`] receiving agent messages addressed to
     /// this node.
-    pub async fn spawn(secret_key: SecretKey, bootstrap: Vec<EndpointId>) -> Result<(Self, Inbox)> {
-        let endpoint = Endpoint::builder(presets::N0)
+    pub async fn spawn(secret_key: SecretKey, config: Config) -> Result<(Self, Inbox)> {
+        // Start from n0's defaults (public relays + DNS/pkarr discovery), then
+        // override whichever pieces the config self-hosts.
+        let mut builder = Endpoint::builder(presets::N0)
             .secret_key(secret_key)
-            .alpns(vec![agent::ALPN.to_vec(), iroh_gossip::ALPN.to_vec()])
-            // mDNS on top of n0's DNS discovery: advertise + resolve peers on
-            // the local network, so LAN nodes find each other with no relay,
-            // no bootstrap, and even with no internet.
+            .alpns(vec![agent::ALPN.to_vec(), iroh_gossip::ALPN.to_vec()]);
+
+        if let Some(pkarr) = &config.pkarr_relay {
+            // Replace n0 discovery entirely — publish and resolve through our
+            // own pkarr relay so no n0 service is involved.
+            builder = builder
+                .clear_address_lookup()
+                .address_lookup(PkarrPublisher::builder(pkarr.clone()))
+                .address_lookup(PkarrResolver::builder(pkarr.clone()));
+        }
+
+        if !config.relays.is_empty() {
+            builder = builder.relay_mode(RelayMode::Custom(
+                config.relays.iter().cloned().collect(),
+            ));
+        }
+
+        // mDNS on top of whichever discovery is configured: advertise + resolve
+        // peers on the local network, so LAN nodes find each other with no
+        // relay, no bootstrap, and even with no internet.
+        let endpoint = builder
             .address_lookup(MdnsAddressLookup::builder())
             .bind()
             .await
@@ -67,7 +123,8 @@ impl Weft {
             .accept(agent::ALPN, handler)
             .spawn();
 
-        let registry = ServiceRegistry::spawn(gossip.clone(), endpoint.id(), bootstrap).await?;
+        let registry =
+            ServiceRegistry::spawn(gossip.clone(), endpoint.id(), config.bootstrap).await?;
 
         Ok((
             Self { endpoint, gossip, registry, _router: router },

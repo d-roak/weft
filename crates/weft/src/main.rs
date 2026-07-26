@@ -14,8 +14,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use iroh::EndpointId;
-use weft::{AgentMessage, Weft, load_or_create_secret_key};
+use iroh::{EndpointId, RelayUrl};
+use url::Url;
+use weft::{AgentMessage, Config, Weft, load_or_create_secret_key};
 
 use control::{Request, Response};
 
@@ -29,14 +30,37 @@ struct Cli {
     cmd: Cmd,
 }
 
+/// Which network a node joins: relays, discovery, and gossip bootstrap.
+///
+/// Defaults to n0's public infrastructure; point these at your own to run a
+/// fully self-hosted fabric (see `docs/self-hosting.md`).
+#[derive(clap::Args, Clone, Debug, Default)]
+struct NetOpts {
+    /// Peer to bootstrap gossip through (repeatable).
+    #[arg(long)]
+    bootstrap: Vec<EndpointId>,
+    /// Relay server URL (repeatable). Default: n0's public relays.
+    #[arg(long, env = "WEFT_RELAY")]
+    relay: Vec<RelayUrl>,
+    /// pkarr relay used for discovery. Default: n0's public DNS.
+    #[arg(long, env = "WEFT_PKARR_RELAY")]
+    pkarr_relay: Option<Url>,
+}
+
+impl From<NetOpts> for Config {
+    fn from(o: NetOpts) -> Self {
+        Config { bootstrap: o.bootstrap, relays: o.relay, pkarr_relay: o.pkarr_relay }
+    }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Print this node's EndpointId (works without a running daemon).
     Id,
     /// Start the node as a background daemon.
     Start {
-        #[arg(long)]
-        bootstrap: Vec<EndpointId>,
+        #[command(flatten)]
+        net: NetOpts,
         /// Announce a service as `name:kind` (repeatable).
         #[arg(long)]
         announce: Vec<String>,
@@ -60,8 +84,8 @@ enum Cmd {
     Inbox,
     /// Run the node in the foreground (this is what `start` launches).
     Daemon {
-        #[arg(long)]
-        bootstrap: Vec<EndpointId>,
+        #[command(flatten)]
+        net: NetOpts,
         #[arg(long)]
         announce: Vec<String>,
     },
@@ -84,7 +108,7 @@ async fn main() -> Result<()> {
             println!("{}", secret.public());
         }
 
-        Cmd::Start { bootstrap, announce } => start(&key_path, &sock, bootstrap, announce).await?,
+        Cmd::Start { net, announce } => start(&key_path, &sock, net, announce).await?,
 
         Cmd::Stop => match control::call(&sock, &Request::Stop).await {
             Ok(_) => println!("stopped"),
@@ -145,9 +169,7 @@ async fn main() -> Result<()> {
             other => bail!("unexpected response: {other:?}"),
         },
 
-        Cmd::Daemon { bootstrap, announce } => {
-            run_daemon(&key_path, &sock, bootstrap, announce).await?
-        }
+        Cmd::Daemon { net, announce } => run_daemon(&key_path, &sock, net, announce).await?,
     }
     Ok(())
 }
@@ -156,7 +178,7 @@ async fn main() -> Result<()> {
 async fn start(
     key_path: &Path,
     sock: &Path,
-    bootstrap: Vec<EndpointId>,
+    net: NetOpts,
     announce: Vec<String>,
 ) -> Result<()> {
     if control::call(sock, &Request::Status).await.is_ok() {
@@ -181,8 +203,14 @@ async fn start(
         .stderr(err)
         // New process group so closing the terminal / Ctrl-C doesn't kill it.
         .process_group(0);
-    for b in &bootstrap {
+    for b in &net.bootstrap {
         cmd.arg("--bootstrap").arg(b.to_string());
+    }
+    for r in &net.relay {
+        cmd.arg("--relay").arg(r.to_string());
+    }
+    if let Some(pkarr) = &net.pkarr_relay {
+        cmd.arg("--pkarr-relay").arg(pkarr.to_string());
     }
     for a in &announce {
         cmd.arg("--announce").arg(a);
@@ -206,11 +234,11 @@ async fn start(
 async fn run_daemon(
     key_path: &Path,
     sock: &Path,
-    bootstrap: Vec<EndpointId>,
+    net: NetOpts,
     announce: Vec<String>,
 ) -> Result<()> {
     let secret = load_or_create_secret_key(key_path)?;
-    let (weft, mut rx) = Weft::spawn(secret, bootstrap).await?;
+    let (weft, mut rx) = Weft::spawn(secret, net.into()).await?;
     let me = weft.id();
 
     // Buffer inbound messages for the CLI to drain; auto-ack senders.

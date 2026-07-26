@@ -17,7 +17,7 @@
 use anyhow::{Result, bail};
 use iroh::{EndpointId, SecretKey};
 use weft::x402::{KIND_PAYMENT_REQUIRED, PaymentPayload, PaymentRequired, PriceTag, verify_payment};
-use weft::{AgentMessage, Weft};
+use weft::{AgentMessage, Config, Weft};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -38,7 +38,7 @@ fn price() -> PriceTag {
 }
 
 async fn run_server() -> Result<()> {
-    let (weft, mut inbox) = Weft::spawn(SecretKey::generate(), vec![]).await?;
+    let (weft, mut inbox) = Weft::spawn(SecretKey::generate(), Config::default()).await?;
     println!("paid relay online: {}", weft.id());
     println!("invoke it with: cargo run --example x402_relay -- client {}", weft.id());
 
@@ -106,7 +106,7 @@ async fn run_server() -> Result<()> {
 }
 
 async fn run_client(server: EndpointId) -> Result<()> {
-    let (weft, _inbox) = Weft::spawn(SecretKey::generate(), vec![]).await?;
+    let (weft, _inbox) = Weft::spawn(SecretKey::generate(), Config::default()).await?;
     let me = weft.id();
 
     // 1) Unpaid invoke.

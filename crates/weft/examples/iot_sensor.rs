@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use iroh::{EndpointId, SecretKey};
-use weft::{AgentMessage, Weft};
+use weft::{AgentMessage, Config, Weft};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 async fn run_sensor() -> Result<()> {
     // Stable identity so the device keeps the same address across reboots.
     // ponytail: ephemeral key for the demo; persist it on a real device.
-    let (weft, mut inbox) = Weft::spawn(SecretKey::generate(), vec![]).await?;
+    let (weft, mut inbox) = Weft::spawn(SecretKey::generate(), Config::default()).await?;
     println!("sensor online: {}", weft.id());
     println!("read it with:  cargo run --example iot_sensor -- read {}", weft.id());
 
@@ -67,7 +67,7 @@ async fn run_sensor() -> Result<()> {
 }
 
 async fn read_sensor(sensor: EndpointId) -> Result<()> {
-    let (weft, _inbox) = Weft::spawn(SecretKey::generate(), vec![]).await?;
+    let (weft, _inbox) = Weft::spawn(SecretKey::generate(), Config::default()).await?;
     let req = AgentMessage::new(weft.id(), "read", serde_json::Value::Null);
     let reply = weft.send(sensor, &req).await?;
     println!("{}: {}", reply.kind, reply.body);
