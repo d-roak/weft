@@ -51,6 +51,54 @@ weft --key n2.json services
 Once joined, gossip stitches the node into the mesh and announcements propagate
 peer-to-peer; you don't need every node's id, just one reachable bootstrap.
 
+### Why a bootstrap needs only the id — no IP or port
+
+`--bootstrap AAAA…` takes just an `EndpointId`, and that is genuinely all it
+needs. Here's why.
+
+**An `EndpointId` is a public key, not an address.** It's the node's permanent
+identity (the public half of its `SecretKey`). It says *who* to reach, never
+*where* — the "where" (IP addresses, UDP ports, relay) changes as a node moves
+between networks, but the id never does.
+
+**The "where" is looked up from the "who" at connect time.** Every node
+continuously *publishes* its own reachability record — its home **relay URL** and
+whatever **direct socket addresses** (IP:port) it currently has — into discovery,
+signed by its secret key and keyed by its `EndpointId`. Two discovery backends
+run at once:
+
+- **n0 DNS / pkarr** (the default `presets::N0`): the record is published to a
+  DNS-based key-value system and resolved with an HTTPS/DNS lookup on the id.
+  Works across the internet.
+- **mDNS** on the local network: the record is announced over multicast and
+  resolved by any node on the same LAN — no internet, no DNS.
+
+So when you `--bootstrap AAAA…`, iroh does roughly:
+
+```
+EndpointId AAAA…  ──resolve──▶  { relay: https://relay.example,
+                                  direct: [192.168.1.5:51820, …] }
+```
+
+then dials those addresses (and, in parallel, the relay). You never typed an IP
+or port because the node *told the network* its current ones, and the id is the
+key you look them up under.
+
+**Why this is safe.** The address record is signed by the node's secret key and
+the QUIC/TLS handshake authenticates the peer against the `EndpointId`. A wrong
+or spoofed address simply fails the handshake — you always end up talking to the
+holder of that id or to no one. That's also why the id can't be shortened to an
+IP: the id *is* the cryptographic identity the connection is verified against.
+
+**What if the address isn't known yet?** The connection still succeeds: iroh
+reaches the peer through its **relay** first (also resolved from the id), so
+bytes flow immediately, then hole-punches a **direct** path in the background and
+switches over once it's up. See [connectivity.md](connectivity.md).
+
+The upshot: an `EndpointId` is a stable, self-authenticating handle; addresses
+are ephemeral details the fabric resolves for you. Pin a peer's id once and it
+stays reachable across reboots, Wi-Fi↔cellular changes, and IP reassignments.
+
 Common bootstrap sources:
 
 - **mDNS on a LAN — automatic.** Every node weft discovers over local multicast
