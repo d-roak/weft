@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "weft",
+  "description": "P2P communication fabric for agents",
+  "owner": { "name": "d-roak", "url": "https://github.com/d-roak" },
+  "plugins": [
+    {
+      "name": "weft",
+      "source": "./",
+      "description": "Let two Claude sessions or agents talk over weft's P2P fabric — send, receive, discover peers, across NATs with no server.",
+      "version": "0.1.0",
+      "homepage": "https://github.com/d-roak/weft",
+      "repository": "https://github.com/d-roak/weft",
+      "license": "MIT",
+      "keywords": ["p2p", "agents", "messaging"]
+    }
+  ]
+}

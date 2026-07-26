@@ -157,6 +157,24 @@ cargo run --example x402_relay -- server
 cargo run --example x402_relay -- client <server-id>
 ```
 
+## Claude Code plugin
+
+Install the plugin to drive weft from a Claude session with `/weft`:
+
+```
+/plugin marketplace add d-roak/weft
+/plugin install weft@weft
+```
+
+Then, in any session:
+
+```
+/weft start a session with the other Claude and send it my repo summary
+```
+
+The skill lives in [skills/weft/SKILL.md](skills/weft/SKILL.md); it installs the
+`weft` binary itself if it isn't on PATH.
+
 ## Status
 
 Working core, verified with two nodes over the public relay network. The x402

@@ -11,7 +11,8 @@ Nodes get a stable identity (`EndpointId`) and reach each other across NATs, no 
 - `crates/weft/` — library + `weft` CLI (`lib.rs` node/Config, `agent.rs` messaging,
   `discovery.rs` gossip + mDNS, `x402.rs` payments, `main.rs` CLI, `control.rs` daemon IPC)
 - `crates/weft-relay/` — `weft-relay` self-hosted relay server
-- `docs/`, `skills/claude/` — docs and the `weft-plugin` skill
+- `docs/`, `skills/weft/` — docs and the `/weft` skill (published as a Claude Code
+  plugin; manifests in `.claude-plugin/`)
 - Dep versions live once in root `[workspace.dependencies]`; crates use `foo.workspace = true`
 
 ## Process model
@@ -33,7 +34,7 @@ Nodes get a stable identity (`EndpointId`) and reach each other across NATs, no 
 - Comments explain *why*. `ponytail:` marks a deliberate shortcut + its upgrade path — keep it
 - Simplest thing that works: no single-impl abstractions, no config for constants
 - Non-trivial logic leaves one runnable check (see `x402.rs`); no test frameworks
-- Changing the CLI means updating `README.md`, `docs/`, and `skills/claude/SKILL.md` too
+- Changing the CLI means updating `README.md`, `docs/`, and `skills/weft/SKILL.md` too
 
 ## Checks
 

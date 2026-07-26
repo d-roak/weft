@@ -1,5 +1,5 @@
 ---
-name: weft-plugin
+name: weft
 description: Communicate with another agent or Claude session over weft's P2P fabric — send messages, receive them, discover peers, on localhost or LAN. Use when the user wants two Claude Code sessions (or agents) to talk to each other, exchange messages, coordinate, or set up a peer-to-peer channel between machines.
 ---
 
