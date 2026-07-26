@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "weft",
   "description": "Let two Claude sessions or agents talk over weft's P2P fabric — send, receive, discover peers, across NATs with no server.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "d-roak", "url": "https://github.com/d-roak" },
   "homepage": "https://github.com/d-roak/weft",
   "repository": "https://github.com/d-roak/weft",
