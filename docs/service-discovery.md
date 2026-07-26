@@ -7,7 +7,7 @@ directory.
 ## The mechanism: one gossip topic
 
 Every weft node subscribes to a single well-known topic,
-`DISCOVERY_TOPIC` ([src/discovery.rs](../src/discovery.rs)). To offer a
+`DISCOVERY_TOPIC` ([src/discovery.rs](../crates/weft/src/discovery.rs)). To offer a
 capability, a node broadcasts a `ServiceAnnouncement`:
 
 ```jsonc
@@ -104,7 +104,7 @@ Common bootstrap sources:
 - **mDNS on a LAN — automatic.** Every node weft discovers over local multicast
   is added to gossip's known peers for you, so nodes on the same network join the
   swarm with no `--bootstrap` at all. This is handled in
-  [`src/discovery.rs`](../src/discovery.rs) and works offline.
+  [`crates/weft/src/discovery.rs`](../crates/weft/src/discovery.rs) and works offline.
 - A few long-lived "seed" nodes whose ids you ship in config.
 - Any peer id a user already has.
 - Out-of-band exchange (QR, paste, another channel).
@@ -118,4 +118,4 @@ Common bootstrap sources:
 `DISCOVERY_TOPIC` is a fixed constant, so all weft nodes share one discovery
 namespace. To run an isolated fabric (e.g. per-tenant or per-deployment),
 derive a topic from a network name and have nodes subscribe to that instead —
-the `ponytail:` note in `src/discovery.rs` marks the spot.
+the `ponytail:` note in `crates/weft/src/discovery.rs` marks the spot.

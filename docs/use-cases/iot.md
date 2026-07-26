@@ -39,7 +39,7 @@ A consumer reads it from anywhere with just the id:
 let reply = weft.send(device_id, &AgentMessage::new(me, "read", Value::Null)).await?;
 ```
 
-Runnable version: [`examples/iot_sensor.rs`](../../examples/iot_sensor.rs).
+Runnable version: [`examples/iot_sensor.rs`](../../crates/weft/examples/iot_sensor.rs).
 
 ```bash
 cargo run --example iot_sensor -- sensor       # prints the device id

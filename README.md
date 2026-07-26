@@ -42,6 +42,9 @@ and transparently to your code.
   by `EndpointId` on localhost or LAN. → [docs/use-cases/agent-sessions.md](docs/use-cases/agent-sessions.md)
 - **IoT** — the same node model runs on a device: stable identity, no inbound
   port, reachable as it roams networks. → [docs/use-cases/iot.md](docs/use-cases/iot.md)
+- **Self-hostable** — run your own relays with the `weft-relay` binary (and your
+  own discovery), so the fabric depends on no third party.
+  → [docs/self-hosting.md](docs/self-hosting.md)
 
 Architecture overview: [docs/architecture.md](docs/architecture.md).
 
@@ -71,6 +74,19 @@ weft --key a.json stop
 No relay setup, no port forwarding — nodes find each other through iroh's
 discovery (or mDNS on a LAN) and connect directly or via a relay as needed.
 
+### Running on your own infrastructure
+
+Nodes use n0's public relays by default. To depend on no third party, run your
+own relay and point nodes at it:
+
+```bash
+weft-relay --http-bind '[::]:8080'                  # on your server
+weft start --relay http://relay.example.com:8080    # on each node
+```
+
+Discovery can be self-hosted too (`--pkarr-relay`). See
+[docs/self-hosting.md](docs/self-hosting.md).
+
 ## CLI
 
 The daemon holds the live node; every other command is a thin client to it.
@@ -87,6 +103,13 @@ The daemon holds the live node; every other command is a thin client to it.
 | `weft inbox` | Print and clear messages the daemon has received. |
 | `weft daemon` | Run the node in the foreground (what `start` launches). |
 
+`start` and `daemon` also take network options: `--bootstrap <id>` (gossip entry
+point), `--relay <url>` (`WEFT_RELAY`), and `--pkarr-relay <url>`
+(`WEFT_PKARR_RELAY`). Omit them to use n0's public infrastructure.
+
+A second binary, **`weft-relay`**, runs a relay server —
+see [docs/self-hosting.md](docs/self-hosting.md).
+
 Identity is stored at `~/.weft/key.json` (override with `--key`, which also
 selects *which* daemon the CLI talks to). Keep the key to keep your
 `EndpointId` stable across restarts. The control socket lives at
@@ -100,10 +123,11 @@ selects *which* daemon the CLI talks to). Keep the key to keep your
 ## Library
 
 ```rust
-use weft::{Weft, AgentMessage, load_or_create_secret_key};
+use weft::{Weft, AgentMessage, Config, load_or_create_secret_key};
 
 let secret = load_or_create_secret_key("~/.weft/key.json")?;
-let (weft, mut inbox) = Weft::spawn(secret, vec![]).await?;   // bind + discovery + inbox
+// Config::default() = n0's public infra; set `relays`/`pkarr_relay` to self-host.
+let (weft, mut inbox) = Weft::spawn(secret, Config::default()).await?;
 
 // offer a service
 weft.registry().announce("weather", "oracle", serde_json::json!({})).await?;

@@ -5,7 +5,7 @@ session runs a weft node with a **persistent identity**; they exchange messages
 by `EndpointId`. On one machine they connect over loopback; on a LAN they
 hole-punch a direct path. No server, no ports opened.
 
-The runnable example is [`examples/agent_chat.rs`](../../examples/agent_chat.rs).
+The runnable example is [`examples/agent_chat.rs`](../../crates/weft/examples/agent_chat.rs).
 It keeps a persistent key (so each agent's id is stable) and adopts whoever
 messages it as its peer, so only one side needs the other's id to start.
 

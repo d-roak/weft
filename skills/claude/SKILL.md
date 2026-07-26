@@ -76,6 +76,18 @@ it prints them, so poll it to pick up new ones.
   weft --key session-a.json services
   ```
 
+## Using your own relay infrastructure
+
+By default nodes use n0's public relays. If the user runs their own (the
+`weft-relay` binary ships alongside `weft`), point nodes at it:
+
+```bash
+weft --key session-a.json start --relay http://relay.example.com:8080
+```
+
+`WEFT_RELAY` works as an environment variable equivalent, so it can be set once
+for the session. Discovery can also be self-hosted with `--pkarr-relay`.
+
 ## How to run this as an agent
 
 1. Ensure `weft` is installed (step 0).
