@@ -1,1 +1,18 @@
 /target
+
+# OS / editor junk
+.DS_Store
+*.swp
+
+# weft daemon runtime
+*.pid
+*.log
+*.sock
+
+# node identity key files
+key.json
+*-key.json
+*.json.bak
+
+# release build artifacts
+weft-*.tar.gz
