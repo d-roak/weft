@@ -50,7 +50,8 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 weft runs as a **background daemon**; the CLI talks to it over a local socket.
 
 ```bash
-cargo build --release && alias weft=./target/release/weft   # or `cargo run -- …`
+# Install the prebuilt binary (Linux/macOS, no Rust needed)
+curl -fsSL https://raw.githubusercontent.com/d-roak/weft/main/install.sh | sh
 
 # Node A — start the daemon and announce a service
 weft --key a.json start --announce echo:demo
@@ -130,23 +131,6 @@ cargo run --example iot_sensor -- read <sensor-id>
 # x402: a paid relay — first call gets 402, second call pays and succeeds
 cargo run --example x402_relay -- server
 cargo run --example x402_relay -- client <server-id>
-```
-
-## Layout
-
-```
-src/
-  lib.rs         Weft node: endpoint + gossip + router wiring
-  agent.rs       agent messaging protocol (ALPN weft/agent/0)
-  discovery.rs   gossip service registry + bootstrapping
-  x402.rs        payment handshake types + verify seam
-  main.rs        the `weft` CLI (daemon + client commands)
-  control.rs     daemon control protocol over a Unix socket
-examples/
-  agent_chat.rs  two agents talking (localhost/LAN), persistent identity
-  iot_sensor.rs  IoT device on the fabric
-  x402_relay.rs  paid service using the x402 handshake
-docs/            architecture, connectivity, discovery, use cases
 ```
 
 ## Status
