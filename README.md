@@ -1,0 +1,138 @@
+# weft
+
+A peer-to-peer communication fabric for agents, built on [iroh](https://github.com/n0-computer/iroh).
+
+Agents (and devices, and services) get a stable cryptographic identity and can
+talk to each other directly — across NATs, without a central server. iroh
+handles the hard parts (identity, hole-punching, relay fallback, discovery);
+weft adds the thin layer agents actually use: **a messaging protocol, service
+discovery, and optional payments**.
+
+```
+┌──────────── weft (this crate) ────────────┐
+│  agent messaging  │  service discovery     │
+│  (request/reply)  │  (gossip)   │  x402    │
+├────────────────────────────────────────────┤
+│                   iroh                      │
+│  identity · NAT traversal · relay · disco   │
+└─────────────────────────────────────────────┘
+```
+
+## Why
+
+Getting two programs on different machines to talk usually means a broker, a
+public IP, TURN servers, or a cloud queue. weft gives each node a portable
+`EndpointId` and lets any node reach any other by that id alone. Connections are
+**direct when hole-punching works, relayed when it doesn't** — automatically,
+and transparently to your code.
+
+## What you get
+
+- **Base connectivity** — bind a node with one call; it's immediately reachable
+  by its `EndpointId` from anywhere. → [docs/connectivity.md](docs/connectivity.md)
+- **Bootstrapping & service discovery** — nodes announce what they offer on a
+  shared gossip topic; others collect a live registry. On a LAN, **mDNS
+  auto-discovers peers** (works offline) and folds them into the swarm with no
+  `--bootstrap`. → [docs/service-discovery.md](docs/service-discovery.md)
+- **Agent messaging** — a tiny JSON request/reply protocol between nodes.
+- **Payments (x402)** — charge per request for relaying, API access, or any
+  capability, using the [x402](https://x402.org) 402-Payment-Required handshake.
+  → [docs/use-cases/x402.md](docs/use-cases/x402.md)
+- **Agent-to-agent sessions** — two agents (e.g. two Claude Code sessions) talk
+  by `EndpointId` on localhost or LAN. → [docs/use-cases/agent-sessions.md](docs/use-cases/agent-sessions.md)
+- **IoT** — the same node model runs on a device: stable identity, no inbound
+  port, reachable as it roams networks. → [docs/use-cases/iot.md](docs/use-cases/iot.md)
+
+Architecture overview: [docs/architecture.md](docs/architecture.md).
+
+## Quick start
+
+```bash
+# Terminal A — run a node and announce a service
+cargo run -- up --announce echo:demo
+#   weft node up
+#     id: 86a931be48cc4b2b…      ← copy this
+
+# Terminal B — message that node by its id
+cargo run -- send 86a931be48cc4b2b… "hello"
+#   ← reply: ack "received"
+```
+
+No relay setup, no port forwarding — the two nodes find each other through
+iroh's default discovery and connect directly or via a relay as needed.
+
+## CLI
+
+| Command | What it does |
+|---|---|
+| `weft id` | Print this node's `EndpointId` (its shareable address). |
+| `weft up [--announce name:kind]… [--bootstrap <id>]…` | Run the node: connectivity + discovery + agent inbox. |
+| `weft send <to> <text>` | Send a message to a peer and print the reply. |
+| `weft services [--bootstrap <id>]` | Join the fabric and list discovered services. |
+
+Identity is stored at `~/.weft/key.json` (override with `--key`). Keep it to
+keep your `EndpointId` stable across restarts.
+
+> **Bootstrapping note:** gossip discovery needs at least one peer to join
+> through. The first node stands alone; later nodes pass `--bootstrap <id>` of a
+> node already in the swarm. Direct `weft send <id>` messaging needs no
+> bootstrap — the id is enough.
+
+## Library
+
+```rust
+use weft::{Weft, AgentMessage, load_or_create_secret_key};
+
+let secret = load_or_create_secret_key("~/.weft/key.json")?;
+let (weft, mut inbox) = Weft::spawn(secret, vec![]).await?;   // bind + discovery + inbox
+
+// offer a service
+weft.registry().announce("weather", "oracle", serde_json::json!({})).await?;
+
+// receive
+while let Some((msg, reply)) = inbox.recv().await {
+    reply.send(AgentMessage::new(weft.id(), "ack", serde_json::json!("ok")));
+}
+
+// send to a peer (EndpointId is all you need)
+let reply = weft.send(peer_id, &AgentMessage::new(weft.id(), "ping", serde_json::Value::Null)).await?;
+```
+
+## Examples
+
+```bash
+# Two agents chatting (localhost or LAN) — persistent identity each side
+cargo run --example agent_chat -- --key agent1.json            # prints its id
+cargo run --example agent_chat -- --key agent2.json --peer <agent1-id>
+
+# IoT: a sensor node you can read from anywhere
+cargo run --example iot_sensor -- sensor
+cargo run --example iot_sensor -- read <sensor-id>
+
+# x402: a paid relay — first call gets 402, second call pays and succeeds
+cargo run --example x402_relay -- server
+cargo run --example x402_relay -- client <server-id>
+```
+
+## Layout
+
+```
+src/
+  lib.rs         Weft node: endpoint + gossip + router wiring
+  agent.rs       agent messaging protocol (ALPN weft/agent/0)
+  discovery.rs   gossip service registry + bootstrapping
+  x402.rs        payment handshake types + verify seam
+  main.rs        the `weft` CLI
+examples/
+  agent_chat.rs  two agents talking (localhost/LAN), persistent identity
+  iot_sensor.rs  IoT device on the fabric
+  x402_relay.rs  paid service using the x402 handshake
+docs/            architecture, connectivity, discovery, use cases
+```
+
+## Status
+
+Working core, verified with two nodes over the public relay network. The x402
+settlement and payment verification are stubbed at a single seam
+(`x402::verify_payment`) for you to wire to a real facilitator — everything else
+(the handshake, discovery, messaging, connectivity) is real.
