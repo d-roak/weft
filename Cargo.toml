@@ -1,20 +1,26 @@
-[package]
-name = "weft"
+[workspace]
+resolver = "3"
+members = ["crates/weft"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "P2P communication fabric for agents, built on iroh"
 license = "MIT"
 repository = "https://github.com/d-roak/weft"
 
-[dependencies]
+[workspace.dependencies]
 anyhow = "1.0.104"
-clap = { version = "4.6.4", features = ["derive"] }
+clap = { version = "4.6.4", features = ["derive", "env"] }
 iroh = "1.0.3"
 iroh-gossip = "0.101.0"
 iroh-mdns-address-lookup = "0.4.0"
+iroh-relay = "1.0.3"
 n0-future = "0.3.2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "net", "signal"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2"
