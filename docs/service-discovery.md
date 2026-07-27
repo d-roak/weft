@@ -99,15 +99,50 @@ The upshot: an `EndpointId` is a stable, self-authenticating handle; addresses
 are ephemeral details the fabric resolves for you. Pin a peer's id once and it
 stays reachable across reboots, Wi-Fi↔cellular changes, and IP reassignments.
 
+### Public infrastructure is a phone book, not a party line
+
+A common expectation is that because every node shares `DISCOVERY_TOPIC` and
+every node talks to n0's public relays, the swarm should assemble itself. It
+doesn't, and the reason is worth being blunt about:
+
+- **Relays** forward packets and coordinate hole-punching for a node you are
+  *already* trying to reach.
+- **pkarr / DNS discovery** publishes *your own* record, keyed by your public key.
+
+Both answer *"how do I reach node X?"*. Neither answers *"who else is out
+there?"* — there is no global peer list, no DHT to crawl, and topic membership
+is registered nowhere. Two nodes on the same topic with no path between them are
+two separate meshes that happen to share a name. Somebody has to already know
+somebody.
+
 Common bootstrap sources:
 
 - **mDNS on a LAN — automatic.** Every node weft discovers over local multicast
   is added to gossip's known peers for you, so nodes on the same network join the
   swarm with no `--bootstrap` at all. This is handled in
   [`crates/weft/src/discovery.rs`](../crates/weft/src/discovery.rs) and works offline.
-- A few long-lived "seed" nodes whose ids you ship in config.
-- Any peer id a user already has.
-- Out-of-band exchange (QR, paste, another channel).
+- **A seed list — automatic across the internet.** `weft::DEFAULT_BOOTSTRAP`
+  holds the ids of long-lived seed nodes, exactly as kademlia and libp2p ship a
+  bootstrap list. Run one with the
+  [`weft-bootstrap`](self-hosting.md#running-a-bootstrap-node) binary.
+- Any peer id a user already has, or out-of-band exchange (QR, paste, another
+  channel).
+
+### Saving bootstrap peers
+
+Retyping `--bootstrap` on every `start` gets old. `weft config` persists the
+network options next to the key file, and the daemon reads them at startup:
+
+```bash
+weft config set bootstrap AAAA… BBBB…   # ids are validated before writing
+weft config show
+weft start                              # no flags needed
+```
+
+Precedence is **flag → saved config → `DEFAULT_BOOTSTRAP`**. A flag that is
+passed replaces the saved list rather than appending to it, and
+`weft config set bootstrap` with no ids writes an empty list, which opts out of
+the built-in seeds entirely.
 
 > **Direct messaging needs no bootstrap.** If you already have a peer's
 > `EndpointId`, `weft send <id>` connects straight to it. Bootstrapping is only

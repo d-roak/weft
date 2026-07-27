@@ -66,6 +66,12 @@ pub fn log_path(key_path: &Path) -> PathBuf {
     key_dir(key_path).join("weft.log")
 }
 
+/// Saved network config. Lives beside the key, so one key = one daemon = one
+/// config, matching how the socket and pid are already scoped.
+pub fn config_path(key_path: &Path) -> PathBuf {
+    key_dir(key_path).join("config.json")
+}
+
 fn key_dir(key_path: &Path) -> &Path {
     key_path.parent().unwrap_or_else(|| Path::new("."))
 }

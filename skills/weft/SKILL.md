@@ -69,11 +69,18 @@ it prints them, so poll it to pick up new ones.
   ```bash
   weft --key session-a.json services
   ```
-- **Different networks:** exchange ids out of band (the user pastes the other
-  session's id), or bootstrap through a known peer when starting:
+- **Different networks:** there is no global peer list — relays and DNS
+  discovery tell you how to reach a node you already know, not who else exists.
+  So either exchange ids out of band (the user pastes the other session's id),
+  or join through a known peer:
   ```bash
   weft --key session-a.json start --bootstrap KNOWN_PEER_ID
   weft --key session-a.json services
+  ```
+  To stop retyping it, save the peer once — the daemon reads this at startup:
+  ```bash
+  weft --key session-a.json config set bootstrap KNOWN_PEER_ID
+  weft --key session-a.json config show
   ```
 
 ## Using your own relay infrastructure
@@ -86,7 +93,10 @@ weft --key session-a.json start --relay http://relay.example.com:8080
 ```
 
 `WEFT_RELAY` works as an environment variable equivalent, so it can be set once
-for the session. Discovery can also be self-hosted with `--pkarr-relay`.
+for the session. Discovery can also be self-hosted with `--pkarr-relay`, and
+`weft-bootstrap` runs a long-lived seed peer that new nodes join through. Any of
+these can be saved with `weft config set <setting> <value>` instead of being
+passed every time.
 
 ## How to run this as an agent
 

@@ -4,14 +4,15 @@ By default a weft node uses [n0]'s public infrastructure: their relay servers
 and their DNS/pkarr discovery. That's convenient, and it's a third party in your
 path. This page shows how to run the whole fabric on your own machines.
 
-There are two independent pieces:
+There are three independent pieces:
 
 | Piece | What it does | How to self-host |
 |---|---|---|
 | **Relay** | Rendezvous + fallback data path between peers. | Run `weft-relay`, point nodes at it with `--relay`. |
 | **Discovery** | Maps an `EndpointId` → its current addresses. | Run a [pkarr] relay, point nodes at it with `--pkarr-relay`. |
+| **Bootstrap** | The peer new nodes join the gossip swarm through. | Run `weft-bootstrap`, point nodes at it with `--bootstrap`. |
 
-You can self-host either one alone. Relays are the usual starting point.
+You can self-host any one alone. Relays are the usual starting point.
 
 > On a LAN you may need neither: weft's built-in mDNS discovers peers over
 > multicast and connects directly, with no relay and no internet. See
@@ -106,6 +107,73 @@ WantedBy=multi-user.target
 The relay holds no identity or persistent state, so it needs no data directory
 and is safe to restart or run several of.
 
+## Running a bootstrap node
+
+A relay moves bytes and discovery resolves addresses, but neither tells a new
+node *who is out there* — see
+[service-discovery.md](service-discovery.md#public-infrastructure-is-a-phone-book-not-a-party-line).
+Off a LAN, a node joins the gossip swarm through a peer it already knows.
+`weft-bootstrap` is a node whose only job is to be that peer: it stays up, stays
+reachable, and announces itself as `kind = "bootstrap"` so the seed mesh is
+self-describing.
+
+```bash
+weft-bootstrap --key /var/lib/weft/bootstrap.json
+#   weft-bootstrap up
+#     id:  cd01806a9ac8211d…
+#
+#   Add this node to a peer with:
+#     weft config set bootstrap cd01806a9ac8211d…
+```
+
+**The key must be on persistent storage.** The whole value of this process is an
+`EndpointId` that outlives restarts; a bootstrap peer whose id changes on every
+restart is not a bootstrap peer. That is the one operational requirement.
+
+Run more than one and mesh them together, so the seed list is a single swarm
+rather than N islands:
+
+```bash
+# on host 2, joining the node above
+weft-bootstrap --key /var/lib/weft/bootstrap.json --bootstrap cd01806a9ac8211d…
+```
+
+Then hand the ids to nodes — per-node with `weft config set bootstrap <id>…`, or
+baked in for everyone by adding them to `DEFAULT_BOOTSTRAP` in
+[`crates/weft/src/lib.rs`](../crates/weft/src/lib.rs).
+
+### Options
+
+| Flag | Env | Default |
+|---|---|---|
+| `--key <path>` | `WEFT_BOOTSTRAP_KEY` | `/var/lib/weft/bootstrap.json` |
+| `--bootstrap <id>…` | `WEFT_BOOTSTRAP_PEERS` | none |
+| `--relay <url>…` | `WEFT_RELAY` | n0's relays |
+| `--pkarr-relay <url>` | `WEFT_PKARR_RELAY` | n0's DNS |
+| `--name <name>` | `WEFT_BOOTSTRAP_NAME` | `bootstrap` |
+
+### Running it as a service
+
+```ini
+# /etc/systemd/system/weft-bootstrap.service
+[Unit]
+Description=weft bootstrap peer
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/weft-bootstrap
+Environment=WEFT_BOOTSTRAP_KEY=/var/lib/weft/bootstrap.json
+StateDirectory=weft
+Restart=always
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`StateDirectory=weft` is what keeps `/var/lib/weft` (and so the identity) across
+restarts — unlike the relay, this process *does* have persistent state.
+
 ## Self-hosting discovery
 
 A relay gets bytes between peers, but a node still has to *find* a peer's
@@ -139,6 +207,17 @@ work on `weft start` and `weft daemon`:
 |---|---|---|
 | `--relay <url>` | `WEFT_RELAY` | Relay to use (repeatable). Default: n0's relays. |
 | `--pkarr-relay <url>` | `WEFT_PKARR_RELAY` | Discovery service. Default: n0's DNS. |
+| `--bootstrap <id>` | — | Gossip entry point (repeatable). Default: built-in seeds. |
+
+Save them once instead of passing them every time — `weft config` writes them
+next to the key file, and flags override the saved values:
+
+```bash
+weft config set relay http://relay.example.com:8080
+weft config set pkarr-relay https://pkarr.example.com
+weft config set bootstrap cd01806a9ac8211d…
+weft config show
+```
 
 From Rust, the same thing via [`Config`](../crates/weft/src/lib.rs):
 

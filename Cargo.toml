@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/weft", "crates/weft-relay"]
+members = ["crates/weft", "crates/weft-bootstrap", "crates/weft-relay"]
 
 [workspace.package]
 version = "0.2.0"
@@ -23,4 +23,4 @@ serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "net", "signal"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-url = "2"
+url = { version = "2", features = ["serde"] }

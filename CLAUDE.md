@@ -10,6 +10,7 @@ Nodes get a stable identity (`EndpointId`) and reach each other across NATs, no 
 
 - `crates/weft/` — library + `weft` CLI (`lib.rs` node/Config, `agent.rs` messaging,
   `discovery.rs` gossip + mDNS, `x402.rs` payments, `main.rs` CLI, `control.rs` daemon IPC)
+- `crates/weft-bootstrap/` — `weft-bootstrap` long-lived gossip seed peer
 - `crates/weft-relay/` — `weft-relay` self-hosted relay server
 - `docs/`, `skills/weft/` — docs and the `/weft` skill (published as a Claude Code
   plugin; manifests in `.claude-plugin/`)

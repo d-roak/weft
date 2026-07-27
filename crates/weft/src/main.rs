@@ -47,10 +47,32 @@ struct NetOpts {
     pkarr_relay: Option<Url>,
 }
 
-impl From<NetOpts> for Config {
-    fn from(o: NetOpts) -> Self {
-        Config { bootstrap: o.bootstrap, relays: o.relay, pkarr_relay: o.pkarr_relay }
+impl NetOpts {
+    /// Layer explicitly-given flags over a base config (the saved file, or the
+    /// built-in defaults). A flag that wasn't passed leaves the base alone; a
+    /// repeatable flag that *was* passed replaces the base list wholesale —
+    /// append-vs-replace semantics are the kind of thing nobody remembers at 3am.
+    fn merge_over(self, base: Config) -> Config {
+        Config {
+            bootstrap: if self.bootstrap.is_empty() { base.bootstrap } else { self.bootstrap },
+            relays: if self.relay.is_empty() { base.relays } else { self.relay },
+            pkarr_relay: self.pkarr_relay.or(base.pkarr_relay),
+        }
     }
+}
+
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Print the saved network config and where it lives.
+    Show,
+    /// Set `bootstrap`, `relay`, or `pkarr-relay`. No values clears the setting.
+    ///
+    /// `setting`, not `key`: clap matches global args by id, so a positional
+    /// named `key` silently overwrites the global `--key` identity path.
+    Set {
+        setting: String,
+        values: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -82,6 +104,11 @@ enum Cmd {
     Services,
     /// Print and clear messages the daemon has received.
     Inbox,
+    /// Show or edit the saved network config (bootstrap peers, relays).
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
     /// Run the node in the foreground (this is what `start` launches).
     Daemon {
         #[command(flatten)]
@@ -169,9 +196,67 @@ async fn main() -> Result<()> {
             other => bail!("unexpected response: {other:?}"),
         },
 
+        Cmd::Config { cmd } => config_cmd(&control::config_path(&key_path), cmd)?,
+
         Cmd::Daemon { net, announce } => run_daemon(&key_path, &sock, net, announce).await?,
     }
     Ok(())
+}
+
+/// Show or edit the saved network config.
+///
+/// Values are parsed before anything is written, so a typo fails here rather
+/// than at daemon start where it surfaces as a node that quietly talks to nobody.
+fn config_cmd(path: &Path, cmd: ConfigCmd) -> Result<()> {
+    let mut config = Config::load(path);
+    match cmd {
+        ConfigCmd::Show => {
+            println!("config: {}", path.display());
+            if !path.exists() {
+                println!("  (not saved yet — showing built-in defaults)");
+            }
+            println!("  bootstrap:   {}", join(&config.bootstrap));
+            println!("  relay:       {}", join(&config.relays));
+            println!(
+                "  pkarr-relay: {}",
+                config.pkarr_relay.map(|u| u.to_string()).unwrap_or_else(|| "(n0 default)".into())
+            );
+        }
+        ConfigCmd::Set { setting, values } => {
+            match setting.as_str() {
+                "bootstrap" => config.bootstrap = parse_all(&values)?,
+                "relay" => config.relays = parse_all(&values)?,
+                "pkarr-relay" => {
+                    config.pkarr_relay = match values.as_slice() {
+                        [] => None,
+                        [one] => Some(one.parse().context("parsing pkarr-relay")?),
+                        _ => bail!("pkarr-relay takes at most one value"),
+                    }
+                }
+                other => bail!("unknown key `{other}` (bootstrap, relay, pkarr-relay)"),
+            }
+            config.save(path)?;
+            println!("set {setting} in {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+fn parse_all<T: std::str::FromStr>(values: &[String]) -> Result<Vec<T>>
+where
+    T::Err: std::fmt::Display,
+{
+    values
+        .iter()
+        .map(|v| v.parse::<T>().map_err(|e| anyhow::anyhow!("`{v}`: {e}")))
+        .collect()
+}
+
+fn join<T: std::fmt::Display>(items: &[T]) -> String {
+    if items.is_empty() {
+        return "(none)".into();
+    }
+    items.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ")
 }
 
 /// Spawn the daemon as a detached background process, then wait for it to answer.
@@ -238,7 +323,10 @@ async fn run_daemon(
     announce: Vec<String>,
 ) -> Result<()> {
     let secret = load_or_create_secret_key(key_path)?;
-    let (weft, mut rx) = Weft::spawn(secret, net.into()).await?;
+    // Saved config is the base; flags passed to `start`/`daemon` layer over it.
+    let config = net.merge_over(Config::load(control::config_path(key_path)));
+    tracing::info!(bootstrap = ?config.bootstrap, "network config");
+    let (weft, mut rx) = Weft::spawn(secret, config).await?;
     let me = weft.id();
 
     // Buffer inbound messages for the CLI to drain; auto-ack senders.

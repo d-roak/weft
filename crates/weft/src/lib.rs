@@ -25,6 +25,7 @@ use iroh::protocol::Router;
 use iroh::{Endpoint, EndpointId, RelayMode, RelayUrl, SecretKey, endpoint::presets};
 use iroh_gossip::net::Gossip;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 pub mod agent;
@@ -34,13 +35,27 @@ pub mod x402;
 pub use agent::{AgentMessage, Inbox};
 pub use discovery::{ServiceAnnouncement, ServiceRegistry};
 
+/// Bootstrap peers every node starts from, the way kademlia and libp2p ship a
+/// seed list.
+///
+/// This exists because no amount of iroh gets two nodes into the same gossip
+/// swarm on its own: relays and pkarr/DNS answer *"how do I reach node X?"*,
+/// never *"who else is out there?"*. Off a LAN (where mDNS covers it, see
+/// [`discovery`]) somebody has to already know somebody.
+///
+/// Ships empty — populate it with the [`EndpointId`]s of long-lived
+/// `weft-bootstrap` servers. Users override per-node with `weft config set
+/// bootstrap …`, and an explicitly empty list there opts out entirely.
+pub const DEFAULT_BOOTSTRAP: &[&str] = &[];
+
 /// How a node reaches the network: which relays to use, which discovery
 /// service to publish to, and who to bootstrap gossip through.
 ///
 /// [`Config::default`] uses n0's public infrastructure. Set [`Config::relays`]
 /// and/or [`Config::pkarr_relay`] to run entirely on your own — see
 /// `docs/self-hosting.md`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     /// Peers to join the gossip swarm through. Empty = first node / rely on
     /// mDNS on the LAN.
@@ -57,6 +72,20 @@ pub struct Config {
     pub pkarr_relay: Option<Url>,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            // A malformed constant is a build-time typo, not a runtime state.
+            bootstrap: DEFAULT_BOOTSTRAP
+                .iter()
+                .map(|id| id.parse().expect("DEFAULT_BOOTSTRAP entry is not an EndpointId"))
+                .collect(),
+            relays: Vec::new(),
+            pkarr_relay: None,
+        }
+    }
+}
+
 impl Config {
     /// Bootstrap through the given peers, keeping default (n0) infrastructure.
     pub fn with_bootstrap(bootstrap: Vec<EndpointId>) -> Self {
@@ -66,6 +95,34 @@ impl Config {
     /// True when this config points at self-hosted infrastructure.
     pub fn is_self_hosted(&self) -> bool {
         !self.relays.is_empty() || self.pkarr_relay.is_some()
+    }
+
+    /// Read a saved config, falling back to [`Config::default`].
+    ///
+    /// A missing file is the normal case. A *corrupt* file warns and falls back
+    /// rather than failing: a hand-edited config shouldn't leave a node unable
+    /// to start.
+    pub fn load(path: impl AsRef<Path>) -> Self {
+        let Ok(text) = std::fs::read_to_string(path.as_ref()) else {
+            return Self::default();
+        };
+        match serde_json::from_str(&text) {
+            Ok(config) => config,
+            Err(err) => {
+                tracing::warn!(path = %path.as_ref().display(), %err, "ignoring unreadable config");
+                Self::default()
+            }
+        }
+    }
+
+    /// Persist this config so later runs pick it up.
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        std::fs::write(path, serde_json::to_string_pretty(self)?)
+            .with_context(|| format!("writing {}", path.display()))
     }
 }
 
@@ -173,4 +230,35 @@ pub fn load_or_create_secret_key(path: impl AsRef<Path>) -> Result<SecretKey> {
     }
     std::fs::write(path, serde_json::to_string(&key)?).context("writing secret key")?;
     Ok(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_round_trips_and_tolerates_junk() {
+        let dir = std::env::temp_dir().join("weft-config-test");
+        let path = dir.join("config.json");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Missing file → defaults.
+        assert_eq!(Config::load(&path).bootstrap.len(), DEFAULT_BOOTSTRAP.len());
+
+        let id: EndpointId = "ff87a0b0a3c7c0ce827e9cada5ff79e75a44a0633bfcb5b50f99307ddb26b337"
+            .parse()
+            .unwrap();
+        Config::with_bootstrap(vec![id]).save(&path).unwrap();
+        assert_eq!(Config::load(&path).bootstrap, vec![id]);
+
+        // A partial file keeps serde defaults for the rest.
+        std::fs::write(&path, r#"{"relays":[]}"#).unwrap();
+        assert!(Config::load(&path).pkarr_relay.is_none());
+
+        // A corrupt file must not brick the node.
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(Config::load(&path).bootstrap.len(), DEFAULT_BOOTSTRAP.len());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

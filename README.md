@@ -101,13 +101,18 @@ The daemon holds the live node; every other command is a thin client to it.
 | `weft announce <name:kind>` | Announce a service on the fabric. |
 | `weft services` | List services the daemon has discovered. |
 | `weft inbox` | Print and clear messages the daemon has received. |
+| `weft config show` | Print the saved network config and where it lives. |
+| `weft config set <setting> [value]…` | Set `bootstrap`, `relay`, or `pkarr-relay`; no value clears it. |
 | `weft daemon` | Run the node in the foreground (what `start` launches). |
 
 `start` and `daemon` also take network options: `--bootstrap <id>` (gossip entry
 point), `--relay <url>` (`WEFT_RELAY`), and `--pkarr-relay <url>`
-(`WEFT_PKARR_RELAY`). Omit them to use n0's public infrastructure.
+(`WEFT_PKARR_RELAY`). Omit them to use n0's public infrastructure. Save them
+once with `weft config set …` instead of retyping them; flags override the
+saved config, which overrides the built-in seed list.
 
-A second binary, **`weft-relay`**, runs a relay server —
+Two server binaries ship alongside: **`weft-bootstrap`**, a long-lived seed peer
+new nodes join the gossip swarm through, and **`weft-relay`**, a relay server —
 see [docs/self-hosting.md](docs/self-hosting.md).
 
 Identity is stored at `~/.weft/key.json` (override with `--key`, which also
@@ -116,9 +121,11 @@ selects *which* daemon the CLI talks to). Keep the key to keep your
 `/tmp/weft-<hash>.sock`; the pid and log sit next to the key file.
 
 > **Bootstrapping note:** gossip discovery needs at least one peer to join
-> through. The first node stands alone; later nodes pass `--bootstrap <id>` of a
-> node already in the swarm. Direct `weft send <id>` messaging needs no
-> bootstrap — the id is enough.
+> through — public relays and DNS discovery tell you how to reach a node you
+> already know, never who else is out there. On a LAN mDNS handles it; across
+> the internet a node joins through the built-in seed list, a saved
+> `weft config set bootstrap <id>`, or `--bootstrap <id>`. Direct
+> `weft send <id>` messaging needs no bootstrap — the id is enough.
 
 ## Library
 
