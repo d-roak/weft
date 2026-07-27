@@ -138,7 +138,17 @@ async fn main() -> Result<()> {
         Cmd::Start { net, announce } => start(&key_path, &sock, net, announce).await?,
 
         Cmd::Stop => match control::call(&sock, &Request::Stop).await {
-            Ok(_) => println!("stopped"),
+            Ok(_) => {
+                // The daemon answers `Stop` before it closes its endpoint and
+                // unlinks the socket, so returning here would let an immediate
+                // `start` bind a socket that the still-exiting process then
+                // deletes — leaving a live daemon no client can reach. Wait for
+                // the socket to actually go away.
+                if !wait_gone(&sock).await {
+                    println!("warning: daemon still shutting down ({})", sock.display());
+                }
+                println!("stopped");
+            }
             Err(_) => println!("not running"),
         },
 
@@ -201,6 +211,17 @@ async fn main() -> Result<()> {
         Cmd::Daemon { net, announce } => run_daemon(&key_path, &sock, net, announce).await?,
     }
     Ok(())
+}
+
+/// Wait (up to ~5s) for a path to disappear. False if it's still there.
+async fn wait_gone(path: &Path) -> bool {
+    for _ in 0..50 {
+        if !path.exists() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    !path.exists()
 }
 
 /// Show or edit the saved network config.
@@ -360,9 +381,12 @@ async fn run_daemon(
         _ = tokio::signal::ctrl_c() => {}
     }
 
-    weft.endpoint().close().await;
+    // Unlink before the (slow) endpoint close, so the socket file's lifetime
+    // tracks "reachable" rather than "process alive" — a `stop` waiting on it
+    // then hands over to a fresh `start` cleanly.
     let _ = std::fs::remove_file(sock);
     let _ = std::fs::remove_file(&pid);
+    weft.endpoint().close().await;
     Ok(())
 }
 
