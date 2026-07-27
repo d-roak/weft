@@ -123,8 +123,8 @@ Common bootstrap sources:
   [`crates/weft/src/discovery.rs`](../crates/weft/src/discovery.rs) and works offline.
 - **A seed list — automatic across the internet.** `weft::DEFAULT_BOOTSTRAP`
   holds the ids of long-lived seed nodes, exactly as kademlia and libp2p ship a
-  bootstrap list. Run one with the
-  [`weft-bootstrap`](self-hosting.md#running-a-bootstrap-node) binary.
+  bootstrap list. Run one as a
+  [long-lived `weft daemon`](self-hosting.md#running-a-bootstrap-node).
 - Any peer id a user already has, or out-of-band exchange (QR, paste, another
   channel).
 

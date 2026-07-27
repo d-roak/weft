@@ -4048,20 +4048,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "weft-bootstrap"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "clap",
- "iroh",
- "serde_json",
- "tokio",
- "tracing-subscriber",
- "url",
- "weft",
-]
-
-[[package]]
 name = "weft-relay"
 version = "0.2.0"
 dependencies = [

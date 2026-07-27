@@ -93,10 +93,10 @@ weft --key session-a.json start --relay http://relay.example.com:8080
 ```
 
 `WEFT_RELAY` works as an environment variable equivalent, so it can be set once
-for the session. Discovery can also be self-hosted with `--pkarr-relay`, and
-`weft-bootstrap` runs a long-lived seed peer that new nodes join through. Any of
-these can be saved with `weft config set <setting> <value>` instead of being
-passed every time.
+for the session. Discovery can also be self-hosted with `--pkarr-relay`, and a
+long-lived `weft daemon` on a server acts as the seed peer new nodes join
+through. Any of these can be saved with `weft config set <setting> <value>`
+instead of being passed every time.
 
 ## How to run this as an agent
 

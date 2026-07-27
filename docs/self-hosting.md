@@ -10,7 +10,7 @@ There are three independent pieces:
 |---|---|---|
 | **Relay** | Rendezvous + fallback data path between peers. | Run `weft-relay`, point nodes at it with `--relay`. |
 | **Discovery** | Maps an `EndpointId` → its current addresses. | Run a [pkarr] relay, point nodes at it with `--pkarr-relay`. |
-| **Bootstrap** | The peer new nodes join the gossip swarm through. | Run `weft-bootstrap`, point nodes at it with `--bootstrap`. |
+| **Bootstrap** | The peer new nodes join the gossip swarm through. | Run a long-lived `weft daemon`, point nodes at it with `--bootstrap`. |
 
 You can self-host any one alone. Relays are the usual starting point.
 
@@ -113,44 +113,30 @@ A relay moves bytes and discovery resolves addresses, but neither tells a new
 node *who is out there* — see
 [service-discovery.md](service-discovery.md#public-infrastructure-is-a-phone-book-not-a-party-line).
 Off a LAN, a node joins the gossip swarm through a peer it already knows.
-`weft-bootstrap` is a node whose only job is to be that peer: it stays up, stays
-reachable, and announces itself as `kind = "bootstrap"` so the seed mesh is
-self-describing.
+
+A bootstrap node is not a separate program: it's `weft daemon` on a box that
+stays up, with its key on persistent storage.
 
 ```bash
-weft-bootstrap --key /var/lib/weft/bootstrap.json
-#   weft-bootstrap up
-#     id:  cd01806a9ac8211d…
-#
-#   Add this node to a peer with:
-#     weft config set bootstrap cd01806a9ac8211d…
+weft --key /var/lib/weft/bootstrap.json id      # prints the id, creating the key
+weft --key /var/lib/weft/bootstrap.json daemon --announce bootstrap:bootstrap
 ```
 
 **The key must be on persistent storage.** The whole value of this process is an
 `EndpointId` that outlives restarts; a bootstrap peer whose id changes on every
 restart is not a bootstrap peer. That is the one operational requirement.
 
+`--announce bootstrap:bootstrap` makes the seed mesh self-describing: reach one
+seed and `weft services` lists the rest.
+
 Run more than one and mesh them together, so the seed list is a single swarm
 rather than N islands:
 
 ```bash
 # on host 2, joining the node above
-weft-bootstrap --key /var/lib/weft/bootstrap.json --bootstrap cd01806a9ac8211d…
+weft --key /var/lib/weft/bootstrap.json config set bootstrap cd01806a9ac8211d…
+weft --key /var/lib/weft/bootstrap.json daemon --announce bootstrap:bootstrap
 ```
-
-Then hand the ids to nodes — per-node with `weft config set bootstrap <id>…`, or
-baked in for everyone by adding them to `DEFAULT_BOOTSTRAP` in
-[`crates/weft/src/lib.rs`](../crates/weft/src/lib.rs).
-
-### Options
-
-| Flag | Env | Default |
-|---|---|---|
-| `--key <path>` | `WEFT_BOOTSTRAP_KEY` | `/var/lib/weft/bootstrap.json` |
-| `--bootstrap <id>…` | `WEFT_BOOTSTRAP_PEERS` | none |
-| `--relay <url>…` | `WEFT_RELAY` | n0's relays |
-| `--pkarr-relay <url>` | `WEFT_PKARR_RELAY` | n0's DNS |
-| `--name <name>` | `WEFT_BOOTSTRAP_NAME` | `bootstrap` |
 
 ### Running it as a service
 
@@ -161,8 +147,7 @@ Description=weft bootstrap peer
 After=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/weft-bootstrap
-Environment=WEFT_BOOTSTRAP_KEY=/var/lib/weft/bootstrap.json
+ExecStart=/usr/local/bin/weft --key /var/lib/weft/bootstrap.json daemon --announce bootstrap:bootstrap
 StateDirectory=weft
 Restart=always
 DynamicUser=yes
@@ -173,6 +158,31 @@ WantedBy=multi-user.target
 
 `StateDirectory=weft` is what keeps `/var/lib/weft` (and so the identity) across
 restarts — unlike the relay, this process *does* have persistent state.
+
+### Baking seeds into the binary
+
+Per-node, `weft config set bootstrap <id>…` is enough. To make every node start
+from your seeds with no configuration, add their ids to `DEFAULT_BOOTSTRAP` in
+[`crates/weft/src/lib.rs`](../crates/weft/src/lib.rs):
+
+```rust
+pub const DEFAULT_BOOTSTRAP: &[&str] = &[
+    "cd01806a9ac8211d…", // bootstrap1.droak.sh
+    "3c9e12f4b7a05e88…", // bootstrap2.droak.sh
+];
+```
+
+**The list holds ids, not hostnames.** An `EndpointId` is the node's public key
+and iroh needs it *before* it can connect — it is the TLS identity, so there is
+nothing to look a hostname up with. iroh's DNS discovery queries
+`_iroh.<id>.<domain>`; the name never yields the key. Practically this is also
+the better deal: the id is the whole address (relays and pkarr find the box
+wherever it moves), and pinning the key means nobody else can answer for
+`bootstrap1.droak.sh`. Keep the hostname in the comment, for humans.
+
+Rotating a seed key therefore means shipping a new binary. If that ever becomes
+a problem, publish `_weft.bootstrap1.droak.sh TXT "id=…"` and resolve it at
+startup — about fifteen lines against iroh's `DnsResolver`. Not until then.
 
 ## Self-hosting discovery
 

@@ -43,10 +43,19 @@ pub use discovery::{ServiceAnnouncement, ServiceRegistry};
 /// never *"who else is out there?"*. Off a LAN (where mDNS covers it, see
 /// [`discovery`]) somebody has to already know somebody.
 ///
-/// Ships empty — populate it with the [`EndpointId`]s of long-lived
-/// `weft-bootstrap` servers. Users override per-node with `weft config set
-/// bootstrap …`, and an explicitly empty list there opts out entirely.
-pub const DEFAULT_BOOTSTRAP: &[&str] = &[];
+/// Entries are [`EndpointId`]s, never hostnames: an `EndpointId` *is* the
+/// public key, and iroh needs it before any lookup — it's the TLS identity. So
+/// the seed's DNS name belongs in the comment and its id in the string. Pinning
+/// the key is also what stops someone else answering for that name.
+///
+/// Populate it by running long-lived seeds (`weft daemon`, see
+/// `docs/self-hosting.md`) and pasting the id each one prints. Users override
+/// per-node with `weft config set bootstrap …`, and an explicitly empty list
+/// there opts out entirely.
+pub const DEFAULT_BOOTSTRAP: &[&str] = &[
+    // "…", // bootstrap1.droak.sh
+    // "…", // bootstrap2.droak.sh
+];
 
 /// How a node reaches the network: which relays to use, which discovery
 /// service to publish to, and who to bootstrap gossip through.

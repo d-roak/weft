@@ -7,8 +7,8 @@
 set -eu
 
 REPO="d-roak/weft"
-# The tarball ships the node CLI plus the two server binaries.
-BINS="weft weft-bootstrap weft-relay"
+# The tarball ships the node CLI plus the relay server.
+BINS="weft weft-relay"
 INSTALL_DIR="${WEFT_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Map uname -> release target triple.

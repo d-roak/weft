@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/weft", "crates/weft-bootstrap", "crates/weft-relay"]
+members = ["crates/weft", "crates/weft-relay"]
 
 [workspace.package]
 version = "0.2.0"

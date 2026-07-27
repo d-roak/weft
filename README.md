@@ -111,9 +111,9 @@ point), `--relay <url>` (`WEFT_RELAY`), and `--pkarr-relay <url>`
 once with `weft config set …` instead of retyping them; flags override the
 saved config, which overrides the built-in seed list.
 
-Two server binaries ship alongside: **`weft-bootstrap`**, a long-lived seed peer
-new nodes join the gossip swarm through, and **`weft-relay`**, a relay server —
-see [docs/self-hosting.md](docs/self-hosting.md).
+**`weft-relay`** ships alongside as a self-hostable relay server. A bootstrap
+seed peer needs no extra binary — it's a long-lived `weft daemon` with a
+persistent key. Both in [docs/self-hosting.md](docs/self-hosting.md).
 
 Identity is stored at `~/.weft/key.json` (override with `--key`, which also
 selects *which* daemon the CLI talks to). Keep the key to keep your

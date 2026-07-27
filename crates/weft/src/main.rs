@@ -221,7 +221,7 @@ async fn wait_gone(path: &Path) -> bool {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    !path.exists()
+    false
 }
 
 /// Show or edit the saved network config.
@@ -274,10 +274,10 @@ where
 }
 
 fn join<T: std::fmt::Display>(items: &[T]) -> String {
-    if items.is_empty() {
-        return "(none)".into();
+    match items {
+        [] => "(none)".into(),
+        _ => items.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", "),
     }
-    items.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ")
 }
 
 /// Spawn the daemon as a detached background process, then wait for it to answer.
