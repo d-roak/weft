@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use iroh::EndpointId;
@@ -52,7 +52,9 @@ pub struct ServiceAnnouncement {
 #[derive(Clone)]
 pub struct ServiceRegistry {
     me: EndpointId,
-    services: Arc<Mutex<HashMap<String, ServiceAnnouncement>>>,
+    // Each announcement plus when we last heard it — re-announcements every
+    // REANNOUNCE refresh the timestamp, so age doubles as a liveness signal.
+    services: Arc<Mutex<HashMap<String, (ServiceAnnouncement, Instant)>>>,
     outgoing: Arc<tokio::sync::mpsc::Sender<ServiceAnnouncement>>,
 }
 
@@ -97,7 +99,8 @@ impl ServiceRegistry {
             }
         });
 
-        let services: Arc<Mutex<HashMap<String, ServiceAnnouncement>>> = Default::default();
+        let services: Arc<Mutex<HashMap<String, (ServiceAnnouncement, Instant)>>> =
+            Default::default();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<ServiceAnnouncement>(16);
 
         // Inbound: fold received announcements into the registry.
@@ -109,7 +112,7 @@ impl ServiceRegistry {
                     store
                         .lock()
                         .unwrap()
-                        .insert(format!("{}/{}", ann.endpoint_id, ann.name), ann);
+                        .insert(format!("{}/{}", ann.endpoint_id, ann.name), (ann, Instant::now()));
                 }
             }
         });
@@ -162,14 +165,25 @@ impl ServiceRegistry {
         self.services
             .lock()
             .unwrap()
-            .insert(format!("{}/{}", ann.endpoint_id, ann.name), ann.clone());
+            .insert(format!("{}/{}", ann.endpoint_id, ann.name), (ann.clone(), Instant::now()));
         self.outgoing.send(ann).await.context("registry task stopped")?;
         Ok(())
     }
 
     /// Snapshot of all services currently known on the fabric.
     pub fn list(&self) -> Vec<ServiceAnnouncement> {
-        self.services.lock().unwrap().values().cloned().collect()
+        self.services.lock().unwrap().values().map(|(a, _)| a.clone()).collect()
+    }
+
+    /// Like [`Self::list`], with seconds since each announcement was last heard.
+    /// Peers re-announce every 30s, so a large age means the peer is gone.
+    pub fn list_seen(&self) -> Vec<(ServiceAnnouncement, u64)> {
+        self.services
+            .lock()
+            .unwrap()
+            .values()
+            .map(|(a, t)| (a.clone(), t.elapsed().as_secs()))
+            .collect()
     }
 
     /// Services matching a `kind`, e.g. all `"relay"` nodes.
@@ -178,8 +192,8 @@ impl ServiceRegistry {
             .lock()
             .unwrap()
             .values()
-            .filter(|s| s.kind == kind)
-            .cloned()
+            .filter(|(s, _)| s.kind == kind)
+            .map(|(s, _)| s.clone())
             .collect()
     }
 }

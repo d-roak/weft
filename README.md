@@ -101,6 +101,8 @@ The daemon holds the live node; every other command is a thin client to it.
 | `weft announce <name:kind>` | Announce a service on the fabric. |
 | `weft services` | List services the daemon has discovered. |
 | `weft inbox` | Print and clear messages the daemon has received. |
+| `weft peers` | List peers seen on the fabric and how recently each was heard. |
+| `weft dash [--port 4040]` | Serve a live localhost dashboard: peers, freshness, relay status, counters. |
 | `weft config show` | Print the saved network config and where it lives. |
 | `weft config set <setting> [value]…` | Set `bootstrap`, `relay`, or `pkarr-relay`; no value clears it. |
 | `weft daemon` | Run the node in the foreground (what `start` launches). |

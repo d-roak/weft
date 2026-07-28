@@ -7,7 +7,9 @@
 //! local control plane.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use iroh::EndpointId;
@@ -20,6 +22,20 @@ use weft::{AgentMessage, ServiceAnnouncement, Weft};
 /// Received agent messages the daemon holds until the CLI drains them.
 pub type Inbox = Arc<Mutex<Vec<AgentMessage>>>;
 
+/// Counters the daemon accumulates for telemetry. ponytail: two atomics and a
+/// start time — reach for iroh's EndpointMetrics when someone needs bytes/paths.
+pub struct Stats {
+    pub started: Instant,
+    pub sent: AtomicU64,
+    pub received: AtomicU64,
+}
+
+impl Stats {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self { started: Instant::now(), sent: 0.into(), received: 0.into() })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
@@ -30,6 +46,8 @@ pub enum Request {
     Services,
     /// Drain and return buffered inbound messages.
     Inbox,
+    /// Snapshot of the node's counters, relays, and known peers.
+    Telemetry,
     /// Ask the daemon to shut down.
     Stop,
 }
@@ -42,8 +60,36 @@ pub enum Response {
     Reply { message: AgentMessage },
     Services { services: Vec<ServiceAnnouncement> },
     Inbox { messages: Vec<AgentMessage> },
+    Telemetry { telemetry: Telemetry },
     Ok,
     Error { message: String },
+}
+
+/// Everything `weft peers` and `weft dash` need, in one snapshot.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Telemetry {
+    pub id: EndpointId,
+    pub uptime_secs: u64,
+    pub sent: u64,
+    pub received: u64,
+    pub inbox: usize,
+    pub relays: Vec<RelayInfo>,
+    pub peers: Vec<PeerInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RelayInfo {
+    pub url: String,
+    pub connected: bool,
+}
+
+/// A peer as seen through gossip: what it announces and how fresh it is.
+/// Peers re-announce every 30s, so `last_seen_secs` well past that means gone.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PeerInfo {
+    pub id: EndpointId,
+    pub services: Vec<String>,
+    pub last_seen_secs: u64,
 }
 
 /// Control socket path: `/tmp/weft-<hash>.sock`, keyed by the key file so one
@@ -94,22 +140,34 @@ pub async fn call(sock: &Path, req: &Request) -> Result<Response> {
 
 /// Run the control server until a [`Request::Stop`] arrives. The caller owns the
 /// node and the inbox buffer; this just dispatches requests against them.
-pub async fn serve(weft: Weft, inbox: Inbox, listener: UnixListener) -> Result<()> {
+pub async fn serve(
+    weft: Weft,
+    inbox: Inbox,
+    stats: Arc<Stats>,
+    listener: UnixListener,
+) -> Result<()> {
     let stop = Arc::new(Notify::new());
     loop {
         tokio::select! {
             _ = stop.notified() => break,
             accepted = listener.accept() => {
                 let (stream, _) = accepted.context("accepting control connection")?;
-                let (weft, inbox, stop) = (weft.clone(), inbox.clone(), stop.clone());
-                tokio::spawn(handle(stream, weft, inbox, stop));
+                let (weft, inbox, stats, stop) =
+                    (weft.clone(), inbox.clone(), stats.clone(), stop.clone());
+                tokio::spawn(handle(stream, weft, inbox, stats, stop));
             }
         }
     }
     Ok(())
 }
 
-async fn handle(stream: UnixStream, weft: Weft, inbox: Inbox, stop: Arc<Notify>) {
+async fn handle(
+    stream: UnixStream,
+    weft: Weft,
+    inbox: Inbox,
+    stats: Arc<Stats>,
+    stop: Arc<Notify>,
+) {
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut line = String::new();
@@ -119,7 +177,7 @@ async fn handle(stream: UnixStream, weft: Weft, inbox: Inbox, stop: Arc<Notify>)
 
     let (resp, should_stop) = match serde_json::from_str::<Request>(line.trim()) {
         Ok(Request::Stop) => (Response::Ok, true),
-        Ok(req) => (dispatch(req, &weft, &inbox).await, false),
+        Ok(req) => (dispatch(req, &weft, &inbox, &stats).await, false),
         Err(e) => (Response::Error { message: format!("bad request: {e}") }, false),
     };
 
@@ -133,7 +191,7 @@ async fn handle(stream: UnixStream, weft: Weft, inbox: Inbox, stop: Arc<Notify>)
     }
 }
 
-async fn dispatch(req: Request, weft: &Weft, inbox: &Inbox) -> Response {
+async fn dispatch(req: Request, weft: &Weft, inbox: &Inbox, stats: &Stats) -> Response {
     match req {
         Request::Id => Response::Id { id: weft.id() },
         Request::Status => Response::Status {
@@ -144,7 +202,10 @@ async fn dispatch(req: Request, weft: &Weft, inbox: &Inbox) -> Response {
         Request::Send { to, text } => {
             let msg = AgentMessage::new(weft.id(), "message", serde_json::json!(text));
             match weft.send(to, &msg).await {
-                Ok(reply) => Response::Reply { message: reply },
+                Ok(reply) => {
+                    stats.sent.fetch_add(1, Ordering::Relaxed);
+                    Response::Reply { message: reply }
+                }
                 Err(e) => Response::Error { message: e.to_string() },
             }
         }
@@ -158,6 +219,42 @@ async fn dispatch(req: Request, weft: &Weft, inbox: &Inbox) -> Response {
         Request::Inbox => {
             let messages = std::mem::take(&mut *inbox.lock().unwrap());
             Response::Inbox { messages }
+        }
+        Request::Telemetry => {
+            use iroh::Watcher as _;
+            let relays = weft
+                .endpoint()
+                .home_relay_status()
+                .get()
+                .iter()
+                .map(|r| RelayInfo { url: r.url().to_string(), connected: r.is_connected() })
+                .collect();
+            // Group per-service announcements into one entry per peer; a peer is
+            // as fresh as its most recent announcement.
+            let mut peers = std::collections::HashMap::<EndpointId, PeerInfo>::new();
+            for (ann, age) in weft.registry().list_seen() {
+                if ann.endpoint_id == weft.id() {
+                    continue;
+                }
+                let p = peers.entry(ann.endpoint_id).or_insert_with(|| PeerInfo {
+                    id: ann.endpoint_id,
+                    services: Vec::new(),
+                    last_seen_secs: age,
+                });
+                p.last_seen_secs = p.last_seen_secs.min(age);
+                p.services.push(format!("{} ({})", ann.name, ann.kind));
+            }
+            Response::Telemetry {
+                telemetry: Telemetry {
+                    id: weft.id(),
+                    uptime_secs: stats.started.elapsed().as_secs(),
+                    sent: stats.sent.load(Ordering::Relaxed),
+                    received: stats.received.load(Ordering::Relaxed),
+                    inbox: inbox.lock().unwrap().len(),
+                    relays,
+                    peers: peers.into_values().collect(),
+                },
+            }
         }
         Request::Stop => Response::Ok, // handled in `handle`
     }

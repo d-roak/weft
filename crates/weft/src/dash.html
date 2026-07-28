@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>weft dash</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb;
+    --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --border: rgba(11,11,11,0.10); --grid: #e1e0d9;
+    --self: #2a78d6; --good: #0ca30c; --stale: #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19;
+      --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --border: rgba(255,255,255,0.10); --grid: #2c2c2a;
+      --self: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page); color: var(--ink);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 24px; max-width: 960px; margin: 0 auto;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; }
+  header code, td code { color: var(--ink-2); font-size: 12px; }
+  #err { color: var(--ink-2); display: none; margin-bottom: 12px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .tile .v { font-size: 22px; font-weight: 600; }
+  .tile .k { color: var(--muted); font-size: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+  .legend { color: var(--muted); font-size: 12px; display: flex; gap: 16px; padding: 0 4px 4px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font: 11px system-ui, sans-serif; fill: var(--ink-2); }
+  svg .age { fill: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--muted); font-size: 12px; font-weight: 500; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  tr:last-child td { border-bottom: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>weft</h1>
+  <code id="me">…</code>
+  <span id="up" style="color:var(--muted)"></span>
+</header>
+<p id="err">daemon not reachable — is it still running?</p>
+<div class="tiles">
+  <div class="tile"><div class="v" id="t-peers">–</div><div class="k">peers</div></div>
+  <div class="tile"><div class="v" id="t-services">–</div><div class="k">services</div></div>
+  <div class="tile"><div class="v" id="t-sent">–</div><div class="k">sent</div></div>
+  <div class="tile"><div class="v" id="t-received">–</div><div class="k">received</div></div>
+  <div class="tile"><div class="v" id="t-relay">–</div><div class="k" id="t-relay-k">relay</div></div>
+</div>
+<div class="card">
+  <div class="legend">
+    <span><i style="background:var(--self)"></i>this node</span>
+    <span><i style="background:var(--good)"></i>fresh (&lt;90s)</span>
+    <span><i style="background:var(--stale)"></i>stale</span>
+  </div>
+  <svg id="map" viewBox="0 0 640 360" role="img" aria-label="peer topology"></svg>
+</div>
+<div class="card">
+  <table>
+    <thead><tr><th>peer</th><th>services</th><th>last seen</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="3" style="color:var(--muted)">no peers seen yet</td></tr></tbody>
+  </table>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const FRESH = 90; // seconds; peers re-announce every 30s
+const shortId = id => id.slice(0, 10) + '…';
+const ago = s => s < 60 ? s + 's ago' : Math.floor(s / 60) + 'm ago';
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function draw(t) {
+  const peers = [...t.peers].sort((a, b) => a.last_seen_secs - b.last_seen_secs);
+  const cx = 320, cy = 180, r = 130;
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v);
+  let s = '';
+  peers.forEach((p, i) => {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / peers.length;
+    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    const fresh = p.last_seen_secs < FRESH;
+    const color = css(fresh ? '--good' : '--stale');
+    s += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${color}" stroke-width="2"
+            ${fresh ? '' : 'stroke-dasharray="4 4"'} opacity="0.6"/>`;
+    const anchor = x < cx - 5 ? 'end' : x > cx + 5 ? 'start' : 'middle';
+    const dy = y < cy ? -30 : 22; // above the dot when the node sits in the top half
+    s += `<circle cx="${x}" cy="${y}" r="8" fill="${color}"/>
+          <text x="${x}" y="${y + dy}" text-anchor="${anchor}">${shortId(p.id)}</text>
+          <text class="age" x="${x}" y="${y + dy + 13}" text-anchor="${anchor}">${ago(p.last_seen_secs)}</text>`;
+  });
+  s += `<circle cx="${cx}" cy="${cy}" r="11" fill="${css('--self')}"/>
+        <text x="${cx}" y="${cy + 28}" text-anchor="middle" font-weight="600">${shortId(t.id)} (me)</text>`;
+  $('map').innerHTML = s;
+}
+
+async function tick() {
+  let t;
+  try {
+    const res = await fetch('/telemetry');
+    t = await res.json();
+    if (t.error) throw new Error(t.error);
+  } catch {
+    $('err').style.display = 'block';
+    return;
+  }
+  $('err').style.display = 'none';
+  $('me').textContent = t.id;
+  $('up').textContent = 'up ' + (t.uptime_secs < 3600
+    ? Math.floor(t.uptime_secs / 60) + 'm' : Math.floor(t.uptime_secs / 3600) + 'h');
+  $('t-peers').textContent = t.peers.length;
+  $('t-services').textContent = t.peers.reduce((n, p) => n + p.services.length, 0);
+  $('t-sent').textContent = t.sent;
+  $('t-received').textContent = t.received;
+  const up = t.relays.filter(r => r.connected).length;
+  $('t-relay').textContent = t.relays.length ? `${up}/${t.relays.length} ✓` : '—';
+  $('t-relay-k').textContent = t.relays.length ? 'relay connected' : 'relay (none yet)';
+  draw(t);
+  $('rows').innerHTML = t.peers.length
+    ? [...t.peers].sort((a, b) => a.last_seen_secs - b.last_seen_secs).map(p =>
+        `<tr><td><code>${esc(p.id)}</code></td><td>${esc(p.services.join(', '))}</td>
+         <td>${ago(p.last_seen_secs)}</td></tr>`).join('')
+    : '<tr><td colspan="3" style="color:var(--muted)">no peers seen yet</td></tr>';
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

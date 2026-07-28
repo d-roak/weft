@@ -67,7 +67,8 @@ it prints them, so poll it to pick up new ones.
 - **Same LAN:** nothing to do — nodes find each other over mDNS (works offline)
   and auto-join. List what's around:
   ```bash
-  weft --key session-a.json services
+  weft --key session-a.json services   # services on the fabric
+  weft --key session-a.json peers      # peers + how recently each was heard
   ```
 - **Different networks:** there is no global peer list — relays and DNS
   discovery tell you how to reach a node you already know, not who else exists.
@@ -111,4 +112,7 @@ instead of being passed every time.
 - The daemon auto-acks and buffers every inbound message; `weft inbox` drains it.
 - Ids are stable, so a teammate session can be addressed by the same id later.
 - `--key` also selects which daemon the CLI talks to (one key = one daemon).
+- `weft dash` serves a live dashboard at `http://127.0.0.1:4040` (peers,
+  freshness, relay status, message counters) — useful when the user wants to
+  *see* the fabric.
 - More detail: `docs/use-cases/agent-sessions.md` in the repo.

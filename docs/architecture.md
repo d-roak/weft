@@ -73,6 +73,12 @@ over a Unix socket at `/tmp/weft-<hash>.sock` (keyed by the identity file, so on
 response per connection — see [`crates/weft/src/control.rs`](../crates/weft/src/control.rs). Inbound agent
 messages are buffered in the daemon and drained by `weft inbox`.
 
+The daemon also keeps lightweight telemetry: message counters, uptime, relay
+connection state, and per-peer last-seen ages (peers re-announce over gossip
+every 30s, so age doubles as liveness). `weft peers` prints it; `weft dash`
+serves it as a live localhost dashboard, with the CLI process proxying the Unix
+socket to HTTP so the daemon itself never opens a TCP port.
+
 ## Design choices
 
 - **iroh does connectivity; weft does not.** No custom NAT logic, no relay code.

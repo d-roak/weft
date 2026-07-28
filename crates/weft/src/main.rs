@@ -104,6 +104,14 @@ enum Cmd {
     Services,
     /// Print and clear messages the daemon has received.
     Inbox,
+    /// List peers seen on the fabric and how recently each was heard.
+    Peers,
+    /// Serve a live dashboard of this node's peers and counters.
+    Dash {
+        /// Port to serve the dashboard on (localhost only).
+        #[arg(long, default_value_t = 4040)]
+        port: u16,
+    },
     /// Show or edit the saved network config (bootstrap peers, relays).
     Config {
         #[command(subcommand)]
@@ -205,6 +213,27 @@ async fn main() -> Result<()> {
             }
             other => bail!("unexpected response: {other:?}"),
         },
+
+        Cmd::Peers => match control::call(&sock, &Request::Telemetry).await? {
+            Response::Telemetry { telemetry } => {
+                if telemetry.peers.is_empty() {
+                    println!("no peers seen yet");
+                }
+                let mut peers = telemetry.peers;
+                peers.sort_by_key(|p| p.last_seen_secs);
+                for p in peers {
+                    println!(
+                        "• {}  seen {}s ago  {}",
+                        short(&p.id),
+                        p.last_seen_secs,
+                        p.services.join(", ")
+                    );
+                }
+            }
+            other => bail!("unexpected response: {other:?}"),
+        },
+
+        Cmd::Dash { port } => dash(&sock, port).await?,
 
         Cmd::Config { cmd } => config_cmd(&control::config_path(&key_path), cmd)?,
 
@@ -352,10 +381,12 @@ async fn run_daemon(
 
     // Buffer inbound messages for the CLI to drain; auto-ack senders.
     let inbox: control::Inbox = Arc::new(Mutex::new(Vec::new()));
+    let stats = control::Stats::new();
     {
-        let inbox = inbox.clone();
+        let (inbox, stats) = (inbox.clone(), stats.clone());
         tokio::spawn(async move {
             while let Some((msg, reply)) = rx.recv().await {
+                stats.received.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 inbox.lock().unwrap().push(msg);
                 reply.send(AgentMessage::new(me, "ack", serde_json::json!("received")));
             }
@@ -377,7 +408,7 @@ async fn run_daemon(
 
     // Serve until `stop`, or shut down cleanly on Ctrl-C.
     tokio::select! {
-        r = control::serve(weft.clone(), inbox, listener) => r?,
+        r = control::serve(weft.clone(), inbox, stats, listener) => r?,
         _ = tokio::signal::ctrl_c() => {}
     }
 
@@ -388,6 +419,58 @@ async fn run_daemon(
     let _ = std::fs::remove_file(&pid);
     weft.endpoint().close().await;
     Ok(())
+}
+
+/// The dashboard page, embedded so `weft dash` is a single binary.
+const DASH_HTML: &str = include_str!("dash.html");
+
+/// Serve the dashboard on localhost: `/` is the page, `/telemetry` proxies the
+/// daemon's Unix socket as JSON. ponytail: hand-rolled HTTP over TcpListener,
+/// one request per connection — reach for axum if this ever grows a third route.
+async fn dash(sock: &Path, port: u16) -> Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Fail early if there's no daemon to visualize.
+    control::call(sock, &Request::Status).await?;
+
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .with_context(|| format!("binding 127.0.0.1:{port}"))?;
+    println!("dashboard: http://127.0.0.1:{port}  (Ctrl-C to stop)");
+
+    loop {
+        let (mut stream, _) = listener.accept().await?;
+        let sock = sock.to_path_buf();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let Ok(n) = stream.read(&mut buf).await else { return };
+            let req = String::from_utf8_lossy(&buf[..n]);
+
+            let (status, ctype, body): (&str, &str, String) = if req.starts_with("GET /telemetry")
+            {
+                match control::call(&sock, &Request::Telemetry).await {
+                    Ok(Response::Telemetry { telemetry }) => (
+                        "200 OK",
+                        "application/json",
+                        serde_json::to_string(&telemetry).unwrap_or_else(|_| "{}".into()),
+                    ),
+                    _ => ("502 Bad Gateway", "application/json", r#"{"error":"daemon not running"}"#.into()),
+                }
+            } else {
+                ("200 OK", "text/html; charset=utf-8", DASH_HTML.into())
+            };
+
+            let _ = stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+        });
+    }
 }
 
 fn short(id: &EndpointId) -> String {
